@@ -1,4 +1,5 @@
 # LTC_WB-model
-Our code is based on the original code of liquid time constant neural network and is modified to incorporate water balance constraint equations to improve the model's capabilities. 
+1.Our code is based on the original code of liquid time constant neural network and is modified to incorporate water balance constraint equations to improve the model's capabilities. 
 Both the NCP connect(https://doi.org/10.1038/s42256-020-00237-3)(Lechner, M., Hasani, R., Amini, A., Henzinger, T. A., Rus, D., & Grosu, R. (2020). Neural circuit policies enabling auditable autonomy. Nature Machine Intelligence, 2(10), 642-652. https://doi.org/10.1038/s42256-020-00237-3 ) and the LTC model (https://github.com/raminmh/liquid_time_constant_networks)(Hasani, R., Lechner, M., Amini, A., Rus, D., & Grosu, R. (2021). Liquid time-constant networks. Proceedings of the AAAI Conference on Artificial Intelligence. ) code can be obtained for free in the code provided in the corresponding paper. 
-We only provide the most core parts of our modifications here. The other unchanged parts can be obtained in the links of previous articles. Please remember to cite the previous articles.
+2.We only provide the most core parts of our modifications here. The other unchanged parts can be obtained in the links of previous articles. Please remember to cite the previous articles.
+3.The code is written based on pytorch. Please refer to the previous article, which introduces the combination of NCP and LTC in detail.
