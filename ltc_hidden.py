@@ -36,11 +36,11 @@ class LTC(nn.Module):
         else:
             wiring = ncps.wirings.FullyConnected(units)
 
-        # 确保在wiring.build()时使用正确的输入尺寸
+        # Make sure you use the correct input dimensions when wiring.build()
         if not wiring.is_built():
             wiring.build(input_size)
 
-        # 创建LTC单元，传递use_wb_equations参数
+        # Create an LTC unit, passing the use_wb_equations parameter
         self.rnn_cell = LTCCell(
             wiring=wiring,
             in_features=input_size,
@@ -54,9 +54,9 @@ class LTC(nn.Module):
         self._wiring = wiring
         self.use_mixed = mixed_memory
 
-        # 如果使用混合记忆，确保LSTM接收正确维度的输入
+        # If using mixed memory, make sure the LSTM receives input of the correct dimensions
         if self.use_mixed:
-            # LSTM应接收与实际输入维度相同的输入，而不是总是假设有水平衡输出
+            # LSTM should receive inputs of the same dimensions as the actual inputs, rather than always assuming a level-balanced output
             self.lstm = LSTMCell(input_size, self.state_size_without_wb())
 
     @property
@@ -64,7 +64,7 @@ class LTC(nn.Module):
         return self.rnn_cell.state_size
 
     def state_size_without_wb(self):
-        """返回不包括水平衡状态的神经元状态大小"""
+        """Returns the size of the neuron state excluding the water balance state"""
         return self._wiring.units
 
     @property
@@ -81,15 +81,15 @@ class LTC(nn.Module):
 
     def forward(self, input, hx=None, timespans=None):
         """
-        前向传播方法
+        Forward Propagation Method
 
-        参数:
-        input: 输入张量，形状为(L,C)（无批次模式）或(B,L,C)（batch_first=True）或(L,B,C)（batch_first=False）
-        hx: RNN的初始隐藏状态
-        timespans: 可选的时间步长张量
+        parameter:
+        input: input tensor, shape is (L, C) (no batch mode) or (B, L, C) (batch_first=True) or (L, B, C) (batch_first=False)
+        hx: initial hidden state of RNN
+        timespans: optional time step tensor
 
-        返回:
-        (output, hx)元组，其中output为RNN输出，hx为最终隐藏状态
+        return:
+        (output, hx) tuple, where output is the RNN output and hx is the final hidden state
         """
         device = input.device
         is_batched = input.dim() == 3
@@ -102,10 +102,10 @@ class LTC(nn.Module):
 
         batch_size, seq_len = input.size(batch_dim), input.size(seq_dim)
 
-        # 初始化状态，根据是否使用水平衡方程进行不同处理
+        # Initialization state, different processing is performed depending on whether the water balance equation is used
         if hx is None:
             if self.use_wb_equations:
-                # 水平衡状态需要4个额外的状态变量
+                # The water balance state requires 4 additional state variables
                 total_state_size = self.state_size
                 h_state = torch.zeros((batch_size, total_state_size), device=device)
             else:
@@ -151,47 +151,47 @@ class LTC(nn.Module):
                 inputs_t = input[t]
                 ts = 1.0 if timespans is None else timespans[t].squeeze()
 
-            # 根据是否使用水平衡方程进行不同处理
+            # Different treatments are performed depending on whether the water balance equation is used
             if self.use_wb_equations:
-                # 从隐藏状态中分离出神经元状态和水平衡状态
+                # Separating neuronal state and water balance from hidden state
                 neuron_state = h_state[:, :self.state_size_without_wb()]
                 wb_state = h_state[:, self.state_size_without_wb():]
 
-                # 只使用前4个特征计算水平衡
+                # Only the first 4 features are used to calculate water balance
                 wb_inputs = inputs_t[:, :4]
 
-                # 计算水平衡输出并获取新的水平衡状态
+                # Calculate water balance output and obtain new water balance status
                 wb_output, new_wb_state = self.rnn_cell._wb_model_solve(wb_inputs, wb_state, batch_size=batch_size)
 
-                # 将水平衡输出附加到输入，创建增强输入
+                # Append the water balance output to the input, creating an enhanced input
                 augmented_inputs = torch.cat([inputs_t, wb_output], dim=1)
 
-                # 更新h_state中的水平衡状态部分
+                # Update the water balance state part in h_state
                 h_state_new = h_state.clone()
                 h_state_new[:, self.state_size_without_wb():] = new_wb_state
                 h_state = h_state_new
             else:
-                # 不使用水平衡时，直接使用原始输入
+                # When water balancing is not used, the original input is used directly
                 augmented_inputs = inputs_t
 
-            # 混合记忆模式处理
+            # Hybrid memory mode processing
             if self.use_mixed:
                 if self.use_wb_equations:
-                    # 提取神经元状态
+                    # Extracting neuron states
                     neuron_state = h_state[:, :self.state_size_without_wb()]
 
-                    # 使用LSTM处理，确保输入维度正确
+                    # Use LSTM processing to ensure the input dimension is correct
                     h_lstm, c_state = self.lstm(augmented_inputs, (neuron_state, c_state))
 
-                    # 只更新h_state的神经元部分，保留水平衡状态
+                    # Only update the neuron part of h_state to keep the water balance state
                     h_state_new = h_state.clone()
                     h_state_new[:, :self.state_size_without_wb()] = h_lstm
                     h_state = h_state_new
                 else:
-                    # 不使用水平衡时的LSTM更新
+                    # LSTM update without water balancing
                     h_state, c_state = self.lstm(inputs_t, (h_state, c_state))
 
-            # 前向传播LTC单元
+            # Forward propagation LTC unit
             h_out, h_state = self.rnn_cell.forward(
                 augmented_inputs if self.use_wb_equations else inputs_t,
                 h_state,
