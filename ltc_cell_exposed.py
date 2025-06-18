@@ -14,7 +14,7 @@ class LTCCell(nn.Module):
             ode_unfolds=6,
             epsilon=1e-8,
             implicit_param_constraints=False,
-            use_wb_equations=True,  # 添加参数以控制是否使用水平衡方程
+            use_wb_equations=True,  # Add parameter to control whether to use water balance equation
     ):
         """A `Liquid time-constant (LTC) <https://ojs.aaai.org/index.php/AAAI/article/view/16936>`_ cell.
 
@@ -49,24 +49,24 @@ class LTCCell(nn.Module):
         self._ode_unfolds = ode_unfolds
         self._epsilon = epsilon
         self._clip = torch.nn.ReLU()
-        self._use_wb_equations = use_wb_equations  # 是否使用水平衡方程
+        self._use_wb_equations = use_wb_equations  # Whether to use the water balance equation
         self._allocate_parameters()
 
-        # 水平衡方程参数
+        # Water balance equation parameters
         if self._use_wb_equations:
             self._init_wb_parameters()
 
     @property
     def state_size(self):
-        # 状态大小现在包括神经元状态和水平衡状态（如果启用）
+        # State size now includes neuron state and water balance state (if enabled)
         if self._use_wb_equations:
-            return self._wiring.units + 1  # +4 用于水平衡状态(移除了积雪水库)
+            return self._wiring.units + 1
         else:
             return self._wiring.units
 
     @property
     def regular_state_size(self):
-        # 原始状态大小（不包括水平衡状态）
+        # Original size (excluding water balance)
         return self._wiring.units
 
     @property
@@ -125,12 +125,12 @@ class LTCCell(nn.Module):
             name="erev", init_value=torch.Tensor(self._wiring.erev_initializer()),
         )
 
-        # 检查是否使用水平衡方程，以确定sensory_size
-        # 在使用水平衡方程时，sensory_size应该包括原始输入特征和水平衡输出
+        # Checks whether to use the water balance equation to determine sensor_size
+        # When using the water balance equation, sensor_size should include the original input features and the water balance output
         real_sensory_size = self.sensory_size
         if self._use_wb_equations:
-            # sensory_size不会自动调整，因此我们需要预先考虑水平衡输出
-            # 注意: 确保这与wiring.build()调用的参数一致
+            # sensory_sizeIt will not adjust automatically, so we need to consider the water balance output in advance
+            # NOTE: Make sure this matches the arguments to the wiring.build() call
             real_sensory_size = self.sensory_size
 
         self._params["sensory_sigma"] = self.add_weight(
@@ -183,10 +183,10 @@ class LTCCell(nn.Module):
             )
 
     def _init_wb_parameters(self):
-        """初始化水平衡方程参数,移除与土壤层相关的参数"""
+        """Initialize water balance equation parameters and remove parameters related to soil layer"""
         self.wb_params = {}
 
-        # 岩溶含水层特有参数
+        # Karst aquifer-specific parameters
         self.wb_params["karst_storage"] = self.add_weight(
             name="karst_storage", init_value=torch.rand(1) * 50.0 + 100.0  # 100-150
         )
@@ -197,7 +197,7 @@ class LTCCell(nn.Module):
             name="karst_infiltration", init_value=torch.rand(1) * 0.4 + 0.3  # 0.3-0.7
         )
 
-        # 地下水开采参数
+        # Groundwater extraction parameters
         self.wb_params["pumping_factor"] = self.add_weight(
             name="pumping_factor", init_value=torch.rand(1) * 0.5 + 0.5  # 0.5-1.0
         )
@@ -209,20 +209,20 @@ class LTCCell(nn.Module):
         return torch.sigmoid(x)
 
     def _ode_solver(self, inputs, state, elapsed_time):
-        # 这里的state现在只包含神经元状态
+        # The state here now only contains the neuron state
         v_pre = state
 
-        # 为张量化处理，确保elapsed_time形状正确
-        # 如果elapsed_time是标量，转换为适当形状的张量
+        # For tensor quantization, ensure that the shape of elapsed_time is correct
+        # If elapsed_time is a scalar, convert it to a tensor of appropriate shape
         if isinstance(elapsed_time, (int, float)):
             elapsed_time = torch.tensor([elapsed_time], device=inputs.device)
 
-        # 将elapsed_time变成与state兼容的形状以便于批处理计算
+        # Transform elapsed_time into a shape compatible with state for batch processing
         batch_size = inputs.size(0)
         if elapsed_time.shape[0] != batch_size:
             elapsed_time = elapsed_time.expand(batch_size)
 
-        # 预计算传感神经元的影响
+        # Pre-computed sensor neuron effects
         sensory_w_activation = self.make_positive_fn(
             self._params["sensory_w"]
         ) * self._sigmoid(
@@ -234,20 +234,20 @@ class LTCCell(nn.Module):
 
         sensory_rev_activation = sensory_w_activation * self._params["sensory_erev"]
 
-        # 在维度1上减少（=源感觉神经元）
+        # Reduced in dimension 1 (= source sensory neurons)
         w_numerator_sensory = torch.sum(sensory_rev_activation, dim=1)
         w_denominator_sensory = torch.sum(sensory_w_activation, dim=1)
 
-        # 对每个样本使用其对应的elapsed_time
-        # 将cm_t计算改为批处理方式
+        # For each sample, use its corresponding elapsed_time
+        # Change cm_t calculation to batch mode
         cm = self.make_positive_fn(self._params["cm"])
-        # 扩展cm以便于每个样本使用自己的elapsed_time
+        # Extend cm so that each sample uses its own elapsed_time
         cm_expanded = cm.unsqueeze(0).expand(batch_size, -1)
-        # 计算每个样本的cm_t
+        # Calculate cm_t for each sample
         elapsed_time_expanded = elapsed_time.unsqueeze(1)
         cm_t = cm_expanded / (elapsed_time_expanded / self._ode_unfolds)
 
-        # 展开多个ODE到一个RNN步骤
+        # Unroll multiple ODEs into one RNN step
         w_param = self.make_positive_fn(self._params["w"])
         for t in range(self._ode_unfolds):
             w_activation = w_param * self._sigmoid(
@@ -258,7 +258,7 @@ class LTCCell(nn.Module):
 
             rev_activation = w_activation * self._params["erev"]
 
-            # 在维度1上减少（=源神经元）
+            # Reduce on dimension 1 (=source neurons)
             w_numerator = torch.sum(rev_activation, dim=1) + w_numerator_sensory
             w_denominator = torch.sum(w_activation, dim=1) + w_denominator_sensory
 
@@ -269,48 +269,48 @@ class LTCCell(nn.Module):
             numerator = cm_t * v_pre + gleak_expanded * vleak_expanded + w_numerator
             denominator = cm_t + gleak_expanded + w_denominator
 
-            # 避免除以0
+            # Avoid division by 0
             v_pre = numerator / (denominator + self._epsilon)
 
         return v_pre
 
     def _wb_model_solve(self, inputs, wb_states, batch_size=1):
-        """使用向量化计算的水平衡方程方法,移除植被截留、毛细管和重力水库"""
+        """Use vectorized water balance method to remove vegetation interception, capillary and gravity reservoirs"""
         device = inputs.device
 
-        # 从状态向量中提取水平衡状态
-        S5 = wb_states[:, 0:1]  # 岩溶含水层水库
+        # Extracting the water balance state from the state vector
+        S5 = wb_states[:, 0:1]  # Karst aquifer reservoir
 
-        # 解析输入
-        P = inputs[:, 0:1]  # 降水
-        T = inputs[:, 1:2]  # 温度
-        GWE = inputs[:, 2:3] if inputs.shape[1] > 2 else torch.ones((batch_size, 1), device=device) * 0.5  # 地下水开采
+        # Parsing Input
+        P = inputs[:, 0:1]  # precipitation
+        T = inputs[:, 1:2]  # temperature
+        GWE = inputs[:, 2:3] if inputs.shape[1] > 2 else torch.ones((batch_size, 1), device=device) * 0.5  # Groundwater extraction
 
-        # 简化处理：直接将降雨视为地表径流
+        # Simplified treatment: directly treating rainfall as surface runoff
         Qhor = P
 
-        # 岩溶含水层参数
-        karst_storage = self.wb_params["karst_storage"]  # 岩溶储水能力
-        karst_release = self.wb_params["karst_release"]  # 岩溶水库释放系数
+        # Karst aquifer parameters
+        karst_storage = self.wb_params["karst_storage"]  # Karst water storage capacity
+        karst_release = self.wb_params["karst_release"]  # Release coefficient of karst reservoir
 
-        # 计算进入岩溶含水层的水量
+        # Calculating the amount of water entering the karst aquifer
         Qtokarst = Qhor * self.wb_params["karst_infiltration"]
 
-        # 计算从岩溶含水层释放的水量
-        s5_ratio = S5 / karst_storage  # 岩溶含水层饱和度
+        # Calculating the amount of water released from karst aquifers
+        s5_ratio = S5 / karst_storage  # Karst aquifer saturation
         Qkarst_release = S5 * karst_release * torch.sigmoid(s5_ratio * 10)
 
-        # 加入地下水开采的影响
-        pumping_factor = self.wb_params["pumping_factor"]  # 抽水系数
+        # Adding the impact of groundwater extraction
+        pumping_factor = self.wb_params["pumping_factor"]  # Pumping coefficient
         actual_extraction = GWE * pumping_factor * torch.sigmoid(S5 / (karst_storage * 0.1))
 
-        # 更新岩溶含水层水库
+        # Renewal of karst aquifer reservoirs
         new_S5 = S5 + Qtokarst - Qkarst_release - actual_extraction
 
-        # 地下水位变化主要由岩溶含水层决定
+        # Groundwater level changes are mainly determined by karst aquifers
         Qgw = Qtokarst - Qkarst_release - actual_extraction
 
-        # 返回地下水位变化和新的状态
+        # Returns the groundwater level change and the new state
         return Qgw, new_S5
 
     def _map_inputs(self, inputs):
@@ -321,9 +321,9 @@ class LTCCell(nn.Module):
         return inputs
 
     def _map_outputs(self, state):
-        # 如果使用水平衡方程，state包含神经元状态和水平衡状态
+        # If the water balance equation is used, state contains the neuron state and the water balance state.
         if self._use_wb_equations:
-            # 只取神经元状态部分进行输出映射
+            # Only take part of the neuron state for output mapping
             output = state[:, :self.regular_state_size]
         else:
             output = state
@@ -348,28 +348,27 @@ class LTCCell(nn.Module):
 
     def forward(self, inputs, states, elapsed_time=1.0):
         """
-        LTCCell的前向传播方法
+        LTCCell's forward propagation method
 
-        参数:
-        inputs: 输入特征，可能已经包含水平衡输出（如果从LTC传递）
-        states: 隐藏状态，包含神经元状态和水平衡状态
-        elapsed_time: 时间步长
+        parameter:
+        inputs: Input features, may already contain water balance output (if passed from LTC)
+        states: Hidden state, including neuron state and water balance state
+        elapsed_time: Time step
 
-        返回:
-        (outputs, next_state)元组
+        (outputs, next_state)Tuple
         """
-        # 获取批大小
+        # Get the batch size
         batch_size = inputs.size(0) if len(inputs.shape) > 1 else 1
 
-        # 确保 elapsed_time 是张量并且形状正确
+        # Make sure elapsed_time is a tensor and has the correct shape
         if isinstance(elapsed_time, (int, float)):
             elapsed_time = torch.tensor([elapsed_time] * batch_size, device=inputs.device)
-        elif len(elapsed_time.shape) == 0:  # 单个标量张量
+        elif len(elapsed_time.shape) == 0:  # A single scalar tensor
             elapsed_time = elapsed_time.expand(batch_size)
 
-        # 如果使用水平衡方程
+        # If the water balance equation is used
         if self._use_wb_equations:
-            # 分离神经元状态和水平衡状态
+            # Dissociating neuronal status and water balance status
             if len(states.shape) > 1:
                 neuron_states = states[:, :self.regular_state_size]
                 wb_states = states[:, self.regular_state_size:]
@@ -377,15 +376,15 @@ class LTCCell(nn.Module):
                 neuron_states = states[:self.regular_state_size]
                 wb_states = states[self.regular_state_size:]
 
-            # 检查输入特征的数量
+            # Check the number of input features
             if batch_size > 1:
                 feature_count = inputs.size(1)
             else:
                 feature_count = len(inputs)
 
-            # 判断输入是否已经包含水平衡输出
-            # 输入特征数应该是原始特征数(6) + 水平衡输出(1) = 7
-            expected_feature_count = self.sensory_size  # 应该是7
+            # Determine whether the input already contains the water balance output
+            # The input feature number should be the original feature number (6) + the horizontal balance output (1) = 7
+            expected_feature_count = self.sensory_size
 
             if feature_count != expected_feature_count:
                 raise RuntimeError(
@@ -394,29 +393,29 @@ class LTCCell(nn.Module):
                     f"output handling."
                 )
 
-            # 注意：此时的inputs应该已经包含了水平衡输出（从LTC的forward传递）
-            # 所以不需要再次计算和连接水平衡输出
-            # 只需要更新水平衡状态
+            # Note: At this point the inputs should already include the water balance output (passed from LTC forward)
+            # So there is no need to calculate and connect the water balance output again
+            # Only the water balance status needs to be updated
 
-            # 只传递前4个特征进行水平衡计算，更新状态
+            # Only pass the first 4 features for water balance calculation and update the status
             wb_inputs = inputs[:, :4] if batch_size > 1 else inputs[:4]
             _, next_wb_state = self._wb_model_solve(wb_inputs, wb_states, batch_size)
 
-            # 对输入进行映射（此时输入已经包含水平衡输出）
+            # Map the input (the input already includes the water balance output)
             mapped_inputs = self._map_inputs(inputs)
 
-            # 应用ODE求解器更新神经元状态
+            # Apply the ODE solver to update the neuron state
             next_neuron_state = self._ode_solver(mapped_inputs, neuron_states, elapsed_time)
 
-            # 合并神经元状态和水平衡状态
+            # Merging neuronal status and water balance status
             next_state = torch.cat([next_neuron_state, next_wb_state], dim=1)
         else:
-            # 对输入进行映射
+            # Mapping the input
             mapped_inputs = self._map_inputs(inputs)
-            # 原始LTC前向传播
+            # Original LTC forward propagation
             next_state = self._ode_solver(mapped_inputs, states, elapsed_time)
 
-        # 映射输出
+        # Mapping Output
         outputs = self._map_outputs(next_state)
 
         return outputs, next_state
